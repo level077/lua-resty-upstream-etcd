@@ -66,7 +66,7 @@ local res, err = dyups.delete_peer(upstream,{host="127.0.0.1",port=80})
 参数:
 ```
 upstream: upstream名字
-param: 一个table，必须包换的配置为host，port
+param: 一个table，必须包含的配置为host，port
 ```
 
 ##set_healthcheck(upstream,param)
