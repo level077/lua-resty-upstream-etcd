@@ -1,4 +1,4 @@
-动态upstream，基于https://github.com/rrfeng/lua-resty-upstream-etcd修改。   
+动态upstream，基于https://github.com/rrfeng/lua-resty-upstream-etcd 修改。   
 整合了openresty自身的健康检查及lua-resty-balancer的rr，chash负载均衡算法。
 
 #Usage
