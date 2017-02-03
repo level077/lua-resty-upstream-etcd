@@ -7,7 +7,7 @@ nginx.conf相关配置如下：
 http {
    lua_package_path "/path/to/resty/?.lua;;";
    lua_package_cpath "/path/to/resty/?.so;;";
-   #work启动时，从文件或者etcd中读取upstream配置
+   #worker启动时，从文件或者etcd中读取upstream配置
    init_worker_by_lua_file "/path/to/resty/init.lua";
    lua_shared_dict healthcheck 10m;
 
@@ -34,6 +34,7 @@ http {
        }
    }
 }
+```
 
 #Api
 ##find(upstream,key,hash_method)
