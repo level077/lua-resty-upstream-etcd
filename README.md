@@ -1,5 +1,6 @@
 动态upstream，基于https://github.com/rrfeng/lua-resty-upstream-etcd 修改。   
 整合了openresty自身的健康检查及lua-resty-balancer的rr，chash负载均衡算法。
+config.lua是etcd及健康检查的默认配置
 
 #Usage
 nginx.conf相关配置如下：
@@ -69,9 +70,15 @@ upstream: upstream名字
 param: 一个table，必须包含的配置为host，port
 ```
 
-##set_healthcheck(upstream,param)
+##delete_upstream(upstream)
 ```
-local res, err = dyups.set_healthcheck(upstram,param)
+local res, err = dyups.delete_upstream(upstream)
+```
+如果upstream下还有server，则必须先清空server，才能删除upstream
+
+##healthcheck(upstream,param)
+```
+local res, err = dyups.healthcheck(upstram,param)
 ```
 参数:
 ```

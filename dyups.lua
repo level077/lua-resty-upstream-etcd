@@ -139,39 +139,142 @@ local function dump_tofile(force)
     end
 end
 
-local set_healthcheck
-local spawn_healthcheck
-local spawn_healthcheck_from_file 
+local function set_healthcheck(upstream,value)
+        local check
+        if not _M.data[upstream] then
+                _M.data[upstream] = {}
+        end
+        if _M.data[upstream].healthcheck then
+                check = _M.data[upstream].healthcheck
+        end
+        local check_type, check_req, check_interval, check_timeout, check_rise, check_concurrency, check_fall, check_valid
+        if not check then
+                check_type = _M.conf.check_type or "http"
+                check_req = _M.conf.check_req or "GET /1.htm HTTP/1.0\r\nHost: foo.com\r\n\r\n"
+                check_interval = _M.conf.check_interval or 3000
+                check_timeout = _M.conf.check_timeout or 2000
+                check_rise = _M.conf.check_rise or 2
+                check_concurrency = _M.conf.check_concurrency or 10
+                check_fall = _M.conf.check_fall or 3
+                check_valid = _M.conf.check_valid or {200}
+        else
+                if check["typ"] then
+                        check_type = check["typ"]
+                end
+                if check["http_req"] then
+                        check_req = check["http_req"]
+                end
+                if check["interval"] then
+                        check_interval = check["interval"]
+                end
+                if check["timeout"] then
+                        check_timeout = check["timeout"]
+                end
+                if check["rise"] then
+                        check_rise = check["rise"]
+                end
+                if check["concurrency"] then
+                        check_concurrency = check["concurrency"]
+                end
+		if check["fall"] then
+                        check_fall = check["fall"]
+                end
+                if check["valid_statuses"] then
+                        check_valid = check["valid_statuses"]
+                end
+        end
+        if value.type then
+                check_type = value.type
+        end
+        if value.http_req then
+                check_req = value.http_req
+        end
+        if value.interval then
+                check_interval = value.interval
+        end
+        if value.timeout then
+                check_timeout = value.timeout
+        end
+        if value.rise then
+                check_rise = value.rise
+        end
+        if value.fall then
+                check_fall = value.fall
+        end
+        if value.concurrency then
+                check_concurrency = value.concurrency
+        end
+        if value.valid_statuses then
+                check_valid = value.valid_statuses
+        end
+        _M.data[upstream].healthcheck = {typ=check_type,http_req=check_req,interval=check_interval,timeout=check_timeout,rise=check_rise,concurrency=check_concurrency,valid_statuses = check_valid,fall = check_fall}
+end
+
+local function spawn_healthcheck(upstream)
+        local hc = require "lua-resty-upstream-etcd.healthcheck"
+        if not _M.data[upstream].healthcheck then
+                set_healthcheck(upstream,{})
+                log_info("upstream:".. upstream .." use default healthcheck")
+        end
+        local check = _M.data[upstream].healthcheck
+        local ok, err = hc.spawn_checker{
+                dict = _M.conf.dict,
+                upstream = upstream,
+                type = check.typ,
+                http_req = check.http_req,
+                interval = check.interval,
+                timeout = check.timeout,
+                rise = check.rise,
+                fall = check.fall,
+                valid_statuses = check.valid_statuses,
+                concurrency = check.concurrency,
+        }
+        return ok, err
+end
 
 local function hash_server(name)
-	local resty_chash = require "lua-resty-balancer.chash"
-	local resty_rr = require "lua-resty-balancer.roundrobin"
+        local resty_chash = require "lua-resty-balancer.chash"
+        local resty_rr = require "lua-resty-balancer.roundrobin"
         local server_list = _M.data[name].up_servers
-	local count = length(server_list)
-	log_info("count:",count," list:", json.encode(server_list))
-	if count == 0 then
-        	_M[name] = nil
-             	log("upstream:",name," not have a node")
-             	return
+        local count = length(server_list)
+        if count == 0 then
+                _M[name] = nil
+                log("upstream:",name," not have a node")
+                return
         end
-	if not _M[name] then
-		_M[name] = {}
-		local err
-		_M[name]["chash"], err = resty_chash:new(server_list)
-		if not _M[name]["chash"] then
-			log("chash init err:", err)
-		end
-		_M[name]["rr"], err = resty_rr:new(server_list)
-		if not _M[name]["rr"] then
-			log("rr init err:", err)
-		end
-		log_info("balancer init:" .. name)
-	else
-		_M[name]["chash"]:reinit(server_list)
-		log_info("chash reinit:" .. name)
-		_M[name]["rr"]:reinit(server_list)
-		log_info("rr reinit:" .. name)
-	end
+        if not _M[name] then
+                _M[name] = {}
+                local err
+                _M[name]["chash"], err = resty_chash:new(server_list)
+                if not _M[name]["chash"] then
+                        log("chash init err:", err)
+                end
+                _M[name]["rr"], err = resty_rr:new(server_list)
+                if not _M[name]["rr"] then
+                        log("rr init err:", err)
+                end
+                log_info("balancer init:" .. name)
+        else
+                _M[name]["chash"]:reinit(server_list)
+                log_info("chash reinit:" .. name)
+                _M[name]["rr"]:reinit(server_list)
+                log_info("rr reinit:" .. name)
+        end
+end
+
+local function spawn_healthcheck_from_file()
+        for k,v in pairs(_M.data) do
+                if type(v) == "table" then
+                        local ok, err = spawn_healthcheck(k)
+                        if not ok then
+                                log(err)
+                        else
+                                log_info("start watch from file:",k)
+                        end
+                        hash_server(k)
+                        log_info("hash " .. k .. " due to start from file")
+                end
+        end
 end
 
 function _M.find(name,key,hash_method)
@@ -219,8 +322,8 @@ local function watch(premature, conf, index)
                 if not all.errorCode and all.node.nodes then
                     for n, s in pairs(all.node.nodes) do
                         local name = basename(s.key)
-                        _M.data[name] = { count=0, servers={}, up_servers={}}
-                        local s_url = url .. name .. "?recursive=true"
+                        _M.data[name] = { servers={}, up_servers={}}
+                        local s_url = url .. "/" .. name .. "?recursive=true"
                         local res, err = c:request({path = s_url, method = "GET"})
                         if not err then
                             local body, err = res:read_body()
@@ -229,7 +332,7 @@ local function watch(premature, conf, index)
                                 if not svc.errorCode and svc.node.nodes then
                                     for i, j in pairs(svc.node.nodes) do
                                         local w = 1
-                                        local s = "up"
+                                        local s = "down"
                                         local b = basename(j.key)
                                         local ok, value = pcall(json.decode, j.value)
 
@@ -244,7 +347,7 @@ local function watch(premature, conf, index)
 
                                         local h, p, err = split_addr(b)
                                         if not err then
-                                            _M.data[name].servers[#_M.data[name].servers+1] = {host=h, port=p, weight=w, current_weight=0, status=s}
+                                            _M.data[name].servers[#_M.data[name].servers+1] = {host=h, port=p, weight=w, status=s}
 					    if s == "up" then
 						_M.data[name].up_servers[h..":"..p] = w
 					    end
@@ -287,14 +390,14 @@ local function watch(premature, conf, index)
                 if not change.errorCode then
                     local action = change.action
                     if change.node.dir then
-                        local target = change.node.key:match(_M.conf.etcd_path .. '(.*)/?')
+                        local target = change.node.key:match(_M.conf.etcd_path .. '/(.*)/?')
                         if action == "delete" then
                             _M.data[target] = nil
 			    log_info("DELETE [".. target .. "]")
                         elseif action == "set" or action == "update" then
                             local new_svc = target:match('([^/]*).*')
                             if not _M.data[new_svc] then
-                                _M.data[new_svc] = {count=0, servers={}, up_servers={}}
+                                _M.data[new_svc] = {servers={}, up_servers={}}
 				log_info("ADD [".. new_svc .. "]")
 				local ok, err = spawn_healthcheck(new_svc)
                         	if not ok then
@@ -308,7 +411,7 @@ local function watch(premature, conf, index)
                         local ok, value = pcall(json.decode, change.node.value)
 
                         local w = 1
-                        local s = "up"
+                        local s = "down"
 
                         if type(value) == "table" then
                             if value.weight then
@@ -321,7 +424,7 @@ local function watch(premature, conf, index)
 
                         local h, p, err = split_addr(bkd)
                         if not err then
-                            local bs = {host=h, port=p, weight=w, current_weight = 0, status=s}
+                            local bs = {host=h, port=p, weight=w, status=s}
                             local svc = basename(ret)
 
                             if action == "delete" or action == "expire" then
@@ -335,13 +438,13 @@ local function watch(premature, conf, index)
                                 log_info("DELETE [".. svc .. "]: " .. bs.host .. ":" .. bs.port)
                             elseif action == "set" or action == "update" then
                                 if not _M.data[svc] then
-                                    _M.data[svc] = {count=0, servers={bs},up_servers={}}
+                                    _M.data[svc] = {servers={bs},up_servers={}}
 				    log_info("ADD [" .. svc .. "]: " .. bs.host ..":".. bs.port)
 				    if s == "up" then
 					_M.data[svc].up_servers[h..":"..p] = w
 					log_info("ADD up_servers [" .. svc .. "]: " .. h ..":".. p)
 					hash_server(svc)
-					log_info("chash " .. svc .. " due to DIR ADD " .. h .. ":" .. p)
+					log_info("hash " .. svc .. " due to DIR ADD " .. h .. ":" .. p)
 				    end
 				    local ok, err = spawn_healthcheck(svc)
                         	    if not ok then
@@ -358,22 +461,22 @@ local function watch(premature, conf, index)
 						_M.data[svc].up_servers[h..":"..p] = w
 						log_info("ADD up_servers [" .. svc .. "]: " .. h ..":".. p)
 						hash_server(svc)
-						log_info("chash " .. svc .. " due to KEY ADD " .. h .. ":" .. p)
+						log_info("hash " .. svc .. " due to KEY ADD " .. h .. ":" .. p)
 					end
                                     else
                                         _M.data[svc].servers[index] = bs
-                                        log("MODIFY [" .. svc .. "]: " .. bs.host ..":".. bs.port .. " " .. change.node.value)
+                                        log_info("MODIFY [" .. svc .. "]: " .. bs.host ..":".. bs.port .. " " .. change.node.value)
 					if s == "up" then
 						_M.data[svc].up_servers[h..":"..p] = w
 						log_info("MODIFY ADD up_servers [" .. svc .. "]: " .. h ..":".. p)
 						hash_server(svc)
-						log_info("chash " .. svc .. " due to MODIFY " .. h .. ":" .. p)
+						log_info("hash " .. svc .. " due to MODIFY " .. h .. ":" .. p)
 					elseif s == "down" then
 						if _M.data[svc].up_servers[h..":"..p] then
 							_M.data[svc].up_servers[h..":"..p] = nil
 							log_info("MODIFY DELETE up_servers [" .. svc .. "]: " .. h ..":".. p)
 							hash_server(svc)
-							log_info("chash " .. svc .. " due to DELETE " .. h .. ":" .. p)
+							log_info("hash " .. svc .. " due to DELETE " .. h .. ":" .. p)
 						end
 					end
                                     end
@@ -409,8 +512,20 @@ local function watch(premature, conf, index)
     return
 end
 
-function _M.init(conf)
+function _M.init()
+    local conf = require "lua-resty-upstream-etcd.config"
+    if not conf then
+	log("require config.lua")
+	return
+    end
     -- Load the upstreams from file
+    local s = ngx.re.match(conf.etcd_path,'(^/.*?)/{0,}$',"jo")
+    if not s then
+       log("etcd_path config error")
+       return
+    else
+       conf.etcd_path = s[1]
+    end
     if not _M.ready then
         _M.conf = conf
         local f_path = _M.conf.dump_file .. _M.conf.etcd_path:gsub("/", "_")
@@ -467,164 +582,34 @@ function _M.status()
 	end
 end
 
-set_healthcheck = function (name,value)
-	local check 
-	if not _M.data[name] then
-		_M.data[name] = {}
-	end
-	if _M.data[name].healthcheck then
-		check = _M.data[name].healthcheck
-	end
-	local check_type, check_req, check_interval, check_timeout, check_rise, check_concurrency, check_fall, check_valid
-	if not check then
-		check_type = "http"
-		check_req = "GET /1.htm HTTP/1.0\r\nHost: foo.com\r\n\r\n"
-		check_interval = 3000
-		check_timeout = 2000
-		check_rise = 2
-		check_concurrency = 10
-		check_fall = 3
-		check_valid = {200}
-	else
-		if check["typ"] then
-			check_type = check["typ"]
-		end
-		if check["http_req"] then
-                	check_req = check["http_req"]
-		end
-		if check["interval"] then
-                	check_interval = check["interval"]
-        	end
-		if check["timeout"] then
-                	check_timeout = check["timeout"]
-		end
-		if check["rise"] then
-                	check_rise = check["rise"]
-		end
-		if check["concurrency"] then
-                	check_concurrency = check["concurrency"]
-		end
-		if check["fall"] then
-                	check_fall = check["fall"]
-		end
-		if check["valid_statuses"] then
-                	check_valid = check["valid_statuses"]
-		end
-	end
-	if value.type then
-    		check_type = value.type
-     	end
-     	if value.http_req then
-           	check_req = value.http_req
-      	end
-   	if value.interval then
-           	check_interval = value.interval
-     	end
-      	if value.timeout then
-            	check_timeout = value.timeout
-       	end
-       	if value.rise then
-            	check_rise = value.rise
-       	end
-	if value.fall then
-		check_fall = value.fall
-	end
-       	if value.concurrency then
-      		check_concurrency = value.concurrency
-       	end
-      	if value.valid_statuses then
-          	check_valid = value.valid_statuses
-    	end
-	_M.data[name].healthcheck = {typ=check_type,http_req=check_req,interval=check_interval,timeout=check_timeout,rise=check_rise,concurrency=check_concurrency,valid_statuses = check_valid,fall = check_fall}
-end
-
-function _M.get_check_conf(name)
-	if not _M.data[name] then
+function _M.get_check_conf(upstream)
+	if not _M.data[upstream] then
 		return nil
 	end
-	if _M.data[name].healthcheck then
-		return _M.data[name].healthcheck
+	if _M.data[upstream].healthcheck then
+		return _M.data[upstream].healthcheck
 	else
 		return nil
 	end 
 end
 
-spawn_healthcheck = function (upstream)
-        local hc = require "lua-resty-upstream-etcd.healthcheck"
-	if not _M.data[upstream].healthcheck then
-		set_healthcheck(upstream,{})
-		log_info("upstream:".. upstream .." use default healthcheck")
-	end
-	local check = _M.data[upstream].healthcheck
-     	local ok, err = hc.spawn_checker{
-     		dict = _M.conf.dict,
-            	upstream = upstream,
-            	type = check.typ,
-             	http_req = check.http_req,
-             	interval = check.interval,
-             	timeout = check.timeout,
-            	rise = check.rise,
-		fall = check.fall,
-            	valid_statuses = check.valid_statuses,
-           	concurrency = check.concurrency,
-     	}
-	return ok, err
-end
-
-spawn_healthcheck_from_file = function ()
-	for k,v in pairs(_M.data) do
-		if type(v) == "table" then
-			local ok, err = spawn_healthcheck(k)
-			if not ok then
-				log(err)
-			else
-				log_info("start watch from file:",k)
-			end
-			hash_server(k)
-			log_info("chash " .. k .. " due to start from file")
-		end
-	end
-end
-
-function _M.get_primary_peers(name)
-	if _M.data[name] then
-		return _M.data[name].servers
+function _M.get_primary_peers(upstream)
+	if _M.data[upstream] then
+		return _M.data[upstream].servers
 	else
 		return nil
 	end
 end
 
-function _M.set_peer_down(name,server)
-	local conf = _M.conf
-	local url = "/v2/keys" .. conf.etcd_path .. name .. "/" .. server.host .. ":" .. server.port
-	local c = http:new()
-    	c:set_timeout(20000)
-    	c:connect(conf.etcd_host, conf.etcd_port)
-	local res, err = c:request({ path = url, method = "PUT", body = "value="..json.encode(server), headers = {["Content-Type"] = "application/x-www-form-urlencoded"} })
-        if not err then
-        	local body, err = res:read_body()
-             	if not err then
-			local all = json.decode(body)
-                	if all.errorCode then
-				return nil,body	
-			else
-				return 1
-			end
-		else
-			return nil, err
-		end
-	else
-		return nil, err
+local function request_etcd(param)
+	if type(param) ~= "table" then
+		return nil, "param must be table"
 	end
-end
-
-function _M.delete_peer(name,server)
 	local conf = _M.conf
-	local url = "/v2/keys" .. conf.etcd_path .. name .. "/" .. server.host .. ":" .. server.port
 	local c = http:new()
 	c:set_timeout(20000)
 	c:connect(conf.etcd_host, conf.etcd_port)
-	local res, err = c:request({path = url, method = "DELETE"})
+	local res, err = c:request(param)
 	if not err then
 		local body, err = res:read_body()
 		if not err then
@@ -632,43 +617,58 @@ function _M.delete_peer(name,server)
 			if all.errorCode then
 				return nil, body
 			else
-				return 1
+				return true
 			end
 		else
-			return nil, err
+			return nil, err	
 		end
 	else
 		return nil, err
 	end
 end
 
-function _M.add_peer(name,server)
-	local res, err = _M.set_peer_down(name,server)
-	return res, err
+function _M.set_peer_down(upstream,server)
+	local conf = _M.conf
+	local url = "/v2/keys" .. conf.etcd_path .. "/" .. upstream .. "/" .. server.host .. ":" .. server.port
+	return request_etcd({path = url, method = "PUT", body = "value=" .. json.encode(server), headers = {["Content-Type"] = "application/x-www-form-urlencoded"}})
 end
 
-function _M.set_healthcheck(name,health_conf)
+function _M.delete_peer(upstream,server)
 	local conf = _M.conf
-        local url = "/v2/keys" .. conf.etcd_path .. name .. "/healthcheck"
-	local c = http:new()
-        c:set_timeout(20000)
-        c:connect(conf.etcd_host, conf.etcd_port)
-	local res, err = c:request({ path = url, method = "PUT", body = "value="..json.encode(health_conf), headers = {["Content-Type"] = "application/x-www-form-urlencoded"} })
-        if not err then
-                local body, err = res:read_body()
-                if not err then
-                        local all = json.decode(body)
-                        if all.errorCode then
-                                return nil, body
-                        else
-                                return 1
-                        end
-                else
-                        return nil, err
-                end
-        else
-                return nil, err
+	if type(server) ~= "table" then
+                return nil, "server must be table"
         end
+	local url = "/v2/keys" .. conf.etcd_path .. "/" .. upstream .. "/" .. server.host .. ":" .. server.port
+	return request_etcd({ path = url, method = "DELETE"})
+	
+end
+
+function _M.delete_upstream(upstream)
+	local conf = _M.conf
+	if not _M.data[upstream] then
+		return nil, upstream .. "not exist"
+	elseif length(_M.data[upstream].servers) > 0 then
+		return nil, upstream .. " not empty"
+	else
+		local url = "/v2/keys" .. conf.etcd_path .. "/" .. upstream .. "?recursive=true"
+                return request_etcd({path=url, method = "DELETE"})
+	end
+end
+
+function _M.add_peer(upstream,server)
+	if type(server) ~= "table" then
+		return nil, "server must be table"
+	end
+	return _M.set_peer_down(upstream,server)
+end
+
+function _M.healthcheck(upstream,health_conf)
+	local conf = _M.conf
+	if type(health_conf) ~= "table" then
+                return nil, "health_conf must be table"
+        end
+        local url = "/v2/keys" .. conf.etcd_path .. "/" .. upstream .. "/healthcheck"
+	return request_etcd({ path = url, method = "PUT", body = "value="..json.encode(health_conf), headers = {["Content-Type"] = "application/x-www-form-urlencoded"} })
 end
 
 return _M

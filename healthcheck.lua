@@ -84,12 +84,12 @@ local function set_peer_down(ctx,is_backup,id,value)
 	local host = peers[id+1]["host"]
 	local port = peers[id+1]["port"]
 	local weight = peers[id+1]["weight"]
-	local current_weight = peers[id+1]["current_weight"]
+	--local current_weight = peers[id+1]["current_weight"]
 	local server
 	if value then
-		server = { host=host,port=port,weight=weight,current_weight=current_weight,status="down" }	
+		server = { host=host,port=port,weight=weight,status="down" }	
 	else
-		server = { host=host,port=port,weight=weight,current_weight=current_weight,status="up" }
+		server = { host=host,port=port,weight=weight,status="up" }
 	end
 	--errlog("value:",value," sql:",sql)
 	local res,err = dyups.set_peer_down(ctx.upstream,server)	
