@@ -7,6 +7,7 @@ nginx.conf相关配置如下：
 ```
 http {
    lua_package_path "/path/to/resty/?.lua;;";
+   #lua-resty-balancer需要
    lua_package_cpath "/path/to/resty/?.so;;";
    #worker启动时，从文件或者etcd中读取upstream配置
    init_worker_by_lua_file "/path/to/resty/init.lua";
@@ -52,7 +53,7 @@ hash_method: 目前只有chash,rr两种
 
 ##add_peer(upstream,param)
 ```
-local res, err = dyups.add_peer(upsteram,{host="127.0.0.1",port=80,status="up"})
+local res, err = dyups.add_peer(upsteram,{host="127.0.0.1",port=80})
 ```
 参数:
 ```
