@@ -167,7 +167,7 @@ local function peer_fail(ctx, is_backup, id, peer)
     end
 
     if not peer.down and fails >= ctx.fall then
-        errlog("peer ", peer.name, " is turned down after ", fails,
+        errlog("peer ", peer.host,":",peer.port, " is turned down after ", fails,
                 " failure(s)")
         peer.down = true
         set_peer_down_globally(ctx, is_backup, id, true)
@@ -445,7 +445,8 @@ local function check_peers_updates(ctx)
         end
     elseif ctx.version < ver then
         debug("upgrading peers version to ", ver)
-        upgrade_peers_version(ctx, ctx.primary_peers, false);
+	-- the peer upgrade already done by etcd, so no need upgrade_peers_version
+        --upgrade_peers_version(ctx, ctx.primary_peers, false);
         --upgrade_peers_version(ctx, ctx.backup_peers, true);
         ctx.version = ver
     end

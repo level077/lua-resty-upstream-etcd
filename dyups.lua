@@ -311,6 +311,8 @@ local function watch(premature, conf, index)
     local nextIndex
     local url = "/v2/keys" .. conf.etcd_path
 
+    log("index:",index)
+
     -- First time to init all the upstreams.
     if index == nil then
         local s_url = url .. "?recursive=true"
