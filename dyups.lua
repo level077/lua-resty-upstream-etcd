@@ -669,6 +669,13 @@ function _M.healthcheck(upstream,health_conf)
 	if type(health_conf) ~= "table" then
                 return nil, "health_conf must be table"
         end
+	local check = _M.data[upstream].healthcheck
+        for k,v in pairs(check)
+        do
+                if not health_conf[k] then
+                        health_conf[k] = v
+                end
+        end
         local url = "/v2/keys" .. conf.etcd_path .. "/" .. upstream .. "/healthcheck"
 	return request_etcd({ path = url, method = "PUT", body = "value="..json.encode(health_conf), headers = {["Content-Type"] = "application/x-www-form-urlencoded"} })
 end

@@ -2,7 +2,8 @@
 整合了openresty自身的健康检查及lua-resty-balancer的rr，chash负载均衡算法。   
 config.lua是etcd及健康检查的默认配置。
 
-#Usage
+Usage
+=================
 nginx.conf相关配置如下：
 ```
 http {
@@ -38,8 +39,10 @@ http {
 }
 ```
 
-#Api
-##find(upstream,key,hash_method)
+Methods
+==================
+find(upstream,key,hash_method)
+------------------
 ```
 local dyups = require "lua-resty-upstream-etcd.dyups"
 local server = dyups.find(ngx.var.upstream,ngx.var.x_real_ip,ngx.var.hash_method)
@@ -51,7 +54,8 @@ key: hash key
 hash_method: 目前只有chash,rr两种
 ```
 
-##add_peer(upstream,param)
+add_peer(upstream,param)
+-------------------
 ```
 local res, err = dyups.add_peer(upsteram,{host="127.0.0.1",port=80})
 ```
@@ -61,7 +65,8 @@ upstream: upsteam的名字
 param: 一个table，必须包含的配置为host，port，status
 ```
 
-##delete_peer(upstream,param)
+delete_peer(upstream,param)
+----------------------
 ```
 local res, err = dyups.delete_peer(upstream,{host="127.0.0.1",port=80})
 ```
@@ -71,13 +76,15 @@ upstream: upstream名字
 param: 一个table，必须包含的配置为host，port
 ```
 
-##delete_upstream(upstream)
+delete_upstream(upstream)
+--------------------------
 ```
 local res, err = dyups.delete_upstream(upstream)
 ```
 如果upstream下还有server，则必须先清空server，才能删除upstream
 
-##healthcheck(upstream,param)
+healthcheck(upstream,param)
+--------------------------
 ```
 local res, err = dyups.healthcheck(upstram,param)
 ```
@@ -87,11 +94,13 @@ upstream: upstream名字
 param: 一个table，具体配置与openresty健康检查配置一致，详见https://github.com/openresty/lua-resty-upstream-healthcheck
 ```
 
-##status()
+status()
+-----------------------
 upstream状态信息及健康检查配置
 ```
 dyups.status()
 ```
 
-#Dependencies
+Dependencies
+==========================
 - https://github.com/agentzh/lua-resty-balancer
